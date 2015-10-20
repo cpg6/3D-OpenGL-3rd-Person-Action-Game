@@ -19,26 +19,52 @@
  *    SOFTWARE.
  */
 #include <math.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include "mgl_callback.h"
 #include "simple_logger.h"
 #include "graphics3d.h"
 #include "shader.h"
 #include "obj.h"
 #include "vector.h"
 #include "sprite.h"
+#include "entity.h"
+#include "space.h"
+#include "collision.h"
+#include "body.h"
 
 void set_camera(Vec3D position, Vec3D rotation);
+void pollEvents();
+void updateBounds();
+Entity *newPlayer(Vec3D position,const char *name);
+Entity *newFloor(Vec3D position,const char *name);
+Entity *newWall(Vec3D position,const char *name);
+Entity *newObstacle(Vec3D position,const char *name);
+void touch_callback(void *data, void *context);
+char bGameLoopRunning = 1;
+SDL_Event e;
+Vec3D cameraPosition = {0,0,1};
+Vec3D cameraRotation = {90,0,0};
+Vec3D cameraPlayerOffset = {0,-3,2};
+Vec3D newCameraPosition;
+Entity *player, *arenaWall, *arenaFloor, *arenaObstacle[10];
+
+int xMouse, yMouse, xAxis, yAxis;
+int xhigh = 720, xlow = 0;
+int yhigh = 135, ylow = 45;
+
+float maxXVeloc = .5, maxYVeloc = .5, maxZVeloc = .5;
+float minXVeloc = -.5, minYVeloc = -.5, minZVeloc = -.5;
 
 int main(int argc, char *argv[])
 {
+	int j = 0, k = -50, i=0;
     GLuint vao;
+	Space *space;
     float r = 0;
     GLuint triangleBufferObject;
-    char bGameLoopRunning = 1;
-    Vec3D cameraPosition = {0,-10,0.3};
-    Vec3D cameraRotation = {90,0,0};
-    SDL_Event e;
-    Obj *obj,*bgobj;
-    Sprite *texture,*bgtext;
+	
+
     const float triangleVertices[] = {
         0.0f, 0.5f, 0.0f, 1.0f,
         0.5f, -0.366f, 0.0f, 1.0f,
@@ -56,6 +82,7 @@ int main(int argc, char *argv[])
     }
     model_init();
     obj_init();
+	entity_init(255);
     
     glGenVertexArrays(1, &vao);
     glBindVertexArray(vao); //make our vertex array object, we need it to restore state we set after binding it. Re-binding reloads the state associated with it.
@@ -65,131 +92,247 @@ int main(int argc, char *argv[])
     glBufferData(GL_ARRAY_BUFFER, sizeof(triangleVertices), triangleVertices, GL_STATIC_DRAW); //formatting the data for the buffer
     glBindBuffer(GL_ARRAY_BUFFER, 0); //unbind any buffers
     
-    obj = obj_load("models/cube.obj");
-    texture = LoadSprite("models/cube_text.png",1024,1024);
+	player = newPlayer(vec3d(10,-5,2),"Player1");
+	arenaWall = newWall(vec3d(0,0,0),"Wall");
+	arenaFloor = newFloor(vec3d(0,0,0),"Floor");
+	for(j = 0; j < 10; j++)
+	{
+		arenaObstacle[j] = newObstacle(vec3d(k,k,4),"Obstacle");
+		k += 10;
+	}
 
-    bgobj = obj_load("models/mountainvillage.obj");
-    bgtext = LoadSprite("models/mountain_text.png",1024,1024);
+	space = space_new();
+    space_set_steps(space,100);
     
-//    obj = obj_load("models/mountainvillage.obj");
-    
-    
-    while (bGameLoopRunning)
+    space_add_body(space,&player->body);
+	for(j = 0; j < 10; j++)
+		space_add_body(space,&arenaObstacle[j]->body);
+
+    while (bGameLoopRunning) //Main Loop
     {
-        while ( SDL_PollEvent(&e) ) 
+		entity_think_all();
+        for (i = 0; i < 100;i++)
         {
-            if (e.type == SDL_QUIT)
-            {
-                bGameLoopRunning = 0;
-            }
-            else if (e.type == SDL_KEYDOWN)
-            {
-                if (e.key.keysym.sym == SDLK_ESCAPE)
-                {
-                    bGameLoopRunning = 0;
-                }
-                else if (e.key.keysym.sym == SDLK_SPACE)
-                {
-                    cameraPosition.z++;
-                }
-                else if (e.key.keysym.sym == SDLK_z)
-                {
-                    cameraPosition.z--;
-                }
-                else if (e.key.keysym.sym == SDLK_w)
-                {
-                    vec3d_add(
-                        cameraPosition,
-                        cameraPosition,
-                        vec3d(
-                            -sin(cameraRotation.z * DEGTORAD),
-                            cos(cameraRotation.z * DEGTORAD),
-                            0
-                        ));
-                }
-                else if (e.key.keysym.sym == SDLK_s)
-                {
-                    vec3d_add(
-                        cameraPosition,
-                        cameraPosition,
-                        vec3d(
-                            sin(cameraRotation.z * DEGTORAD),
-                            -cos(cameraRotation.z * DEGTORAD),
-                            0
-                        ));
-                }
-                else if (e.key.keysym.sym == SDLK_d)
-                {
-                    vec3d_add(
-                        cameraPosition,
-                        cameraPosition,
-                        vec3d(
-                            cos(cameraRotation.z * DEGTORAD),
-                            sin(cameraRotation.z * DEGTORAD),
-                            0
-                        ));
-                }
-                else if (e.key.keysym.sym == SDLK_a)
-                {
-                    vec3d_add(
-                        cameraPosition,
-                        cameraPosition,
-                        vec3d(
-                            -cos(cameraRotation.z * DEGTORAD),
-                            -sin(cameraRotation.z * DEGTORAD),
-                            0
-                        ));
-                }
-                else if (e.key.keysym.sym == SDLK_LEFT)
-                {
-                    cameraRotation.z += 1;
-                }
-                else if (e.key.keysym.sym == SDLK_RIGHT)
-                {
-                    cameraRotation.z -= 1;
-                }
-                else if (e.key.keysym.sym == SDLK_UP)
-                {
-                    cameraRotation.x += 1;
-                }
-                else if (e.key.keysym.sym == SDLK_DOWN)
-                {
-                    cameraRotation.x -= 1;
-                }
-            }
+            space_do_step(space);
         }
-
+		pollEvents();
         graphics3d_frame_begin();
-        
+
+        vec3d_add(newCameraPosition,player->position,cameraPlayerOffset);	//Update camera position 
+		set_camera(newCameraPosition,player->rotation);						//Apply camera to new snap point
+
+		vec3d_cpy(player->position,player->body.position);					//update mesh position to body position
+		if(player->body.velocity.x > 0)										// slow down on x, y, and z
+			player->body.velocity.x -= .008;
+		if(player->body.velocity.x < 0)										// slow down on x, y, and z
+			player->body.velocity.x += .008;
+		if(player->body.velocity.y > 0)
+			player->body.velocity.y -= .008;
+		if(player->body.velocity.y < 0)
+			player->body.velocity.y += .008;
+		if(player->body.velocity.z > 0)
+			player->body.velocity.z -= .064;
+		if(player->body.position.z > 2)
+			player->body.position.z -= .064;
+		if(player->body.position.z <= 2)									//Prevent floor clipping
+				player->body.position.z = 2;
         glPushMatrix();
-        set_camera(
-            cameraPosition,
-            cameraRotation);
-        
-  
-        obj_draw(
-            bgobj,
-            vec3d(0,0,2),
-            vec3d(90,90,0),
-            vec3d(5,5,5),
-            vec4d(1,1,1,1),
-            bgtext
-        );
-        
-        obj_draw(
-            obj,
-            vec3d(0,0,0),
-            vec3d(90,r++,0),
-            vec3d(0.5,0.5,0.5),
-            vec4d(1,1,1,1),
-            texture
-        );
-        if (r > 360)r -= 360;
+
+		entity_draw_all();
+		
         glPopMatrix();
         /* drawing code above here! */
         graphics3d_next_frame();
     } 
     return 0;
+}
+
+void touch_callback(void *data, void *context)
+{
+    Entity *me,*other;
+    Body *obody;
+    if ((!data)||(!context))return;
+    me = (Entity *)data;
+    obody = (Body *)context;
+    if (entity_is_entity(obody->touch.data))
+    {
+        other = (Entity *)obody->touch.data;
+        slog("%s is ",other->name);
+    }
+    slog("touching me.... touching youuuuuuuu");
+}
+
+void pollEvents()
+{
+	while ( SDL_PollEvent(&e) ) 
+        {
+            if (e.type == SDL_QUIT)
+            {
+                bGameLoopRunning = 0;
+            }
+			
+			if (e.type == SDL_MOUSEMOTION)
+			{
+
+				SDL_GetMouseState(&xMouse, &yMouse);
+
+				xAxis = ((1024/2) - xMouse) * .00625;
+				yAxis = ((768/2) - yMouse) * .00625;
+
+				if(player->rotation.z + xAxis >= xhigh)
+					player->rotation.z = xhigh;
+				else if(player->rotation.z + xAxis <= xlow)
+					player->rotation.z = xlow;
+				else
+					player->rotation.z += xAxis;
+
+				if(player->rotation.x + yAxis >= yhigh)
+					player->rotation.x = yhigh;
+				else if(player->rotation.x + yAxis <= ylow)
+					player->rotation.x = ylow;
+				else
+					player->rotation.x += yAxis;
+			}
+			
+            else if (e.type == SDL_KEYDOWN)
+            {
+				switch(e.key.keysym.sym)
+				{
+					case SDLK_w:
+					{
+						player->body.velocity.y += .1;
+						if(player->body.velocity.y > maxYVeloc)
+							player->body.velocity.y = maxYVeloc;
+						break;
+					}
+					case SDLK_a:
+					{
+						player->body.velocity.x += -.1;
+						if(player->body.velocity.x < minXVeloc)
+							player->body.velocity.x = minXVeloc;
+						break;
+					}
+					case SDLK_s:
+					{
+						player->body.velocity.y += -.1;
+						if(player->body.velocity.y < minYVeloc)
+							player->body.velocity.y = minYVeloc;
+						break;
+					}
+					case SDLK_d:
+					{
+						player->body.velocity.x += .1;
+						if(player->body.velocity.x > maxXVeloc)
+							player->body.velocity.x = maxXVeloc;
+						break;
+					}
+					case SDLK_SPACE:
+					{
+						player->body.velocity.z = maxZVeloc;
+						break;
+					}
+					case SDLK_ESCAPE:
+					{
+						bGameLoopRunning = 0;
+						break;
+					}
+				}
+            }
+        }
+}
+
+Entity *newPlayer(Vec3D position,const char *name)
+{
+    Entity * ent;
+    char buffer[255];
+    int i;
+    ent = entity_new();
+    if (!ent)
+    {
+        return NULL;
+    }
+	ent->uid = 1;
+    ent->objModel = obj_load("models/cube.obj");
+    ent->texture = LoadSprite("models/cube_text.png",1024,1024);
+	ent->health = 100;
+	vec3d_cpy(ent->position,position);
+    vec3d_cpy(ent->body.position,ent->position);
+    cube_set(ent->body.bounds,-1,-1,-1,2,2,2);
+    ent->rotation.x = 90;
+	ent->rotation.z = 360;
+    sprintf(ent->name,"%s",name);
+    //ent->think = think;
+    mgl_callback_set(&ent->body.touch,touch_callback,ent);
+    return ent;
+}
+
+Entity *newFloor(Vec3D position,const char *name)
+{
+    Entity * ent;
+    char buffer[255];
+    int i;
+    ent = entity_new();
+    if (!ent)
+    {
+        return NULL;
+    }
+	ent->uid = 2;
+    ent->objModel = obj_load("models/arena_floor.obj");
+    ent->texture = LoadSprite("models/arena_floor_text.png",1024,1024);
+	vec3d_cpy(ent->position,position);
+    vec3d_cpy(ent->body.position,position);
+    //cube_set(ent->body.bounds,-80,-80,1,2,2,2);
+    ent->rotation.x = 90;
+	ent->rotation.y = 90;
+    sprintf(ent->name,"%s",name);
+    //ent->think = think;
+    mgl_callback_set(&ent->body.touch,touch_callback,ent);
+    return ent;
+}
+
+Entity *newWall(Vec3D position,const char *name)
+{
+    Entity * ent;
+    char buffer[255];
+    int i;
+    ent = entity_new();
+    if (!ent)
+    {
+        return NULL;
+    }
+	ent->uid = 3;
+    ent->objModel = obj_load("models/arena_wall.obj");
+    ent->texture = LoadSprite("models/arena_wall_text.png",1024,1024);
+	vec3d_cpy(ent->position,position);
+    vec3d_cpy(ent->body.position,position);
+    //cube_set(ent->body.bounds,0,0,0,0,0,0); Dont neeed for this
+    ent->rotation.x = 90;
+	ent->rotation.y = 90;
+    sprintf(ent->name,"%s",name);
+    //ent->think = think;
+    mgl_callback_set(&ent->body.touch,touch_callback,ent);
+    return ent;
+}
+
+Entity *newObstacle(Vec3D position,const char *name)
+{
+    Entity * ent;
+    char buffer[255];
+	ent = entity_new();
+	if (!ent)
+	{
+		return NULL;
+	}
+	ent->objModel = obj_load("models/arena_cube.obj");
+	ent->texture = LoadSprite("models/arena_cube_text.png",1024,1024);
+	vec3d_cpy(ent->position,position);
+	vec3d_cpy(ent->body.position,ent->position);
+	cube_set(ent->body.bounds,-2,-2,-2,5,5,5);
+	ent->rotation.x = 90;
+	ent->rotation.y = 90;
+	sprintf(ent->name,"%s",name);
+	mgl_callback_set(&ent->body.touch,touch_callback,ent);
+	return ent;
 }
 
 void set_camera(Vec3D position, Vec3D rotation)
