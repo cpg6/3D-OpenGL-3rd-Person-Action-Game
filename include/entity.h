@@ -13,6 +13,8 @@ typedef struct Entity_S
     int uid;				/**<unique id of this entity*/
     char name[128];
 	int health;
+	int attack;
+	int usesOMana;
 	float exp;
 	float offensiveMana;
 	float defensiveMana;

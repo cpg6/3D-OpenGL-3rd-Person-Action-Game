@@ -1,5 +1,8 @@
 /*
 	//GAMETEST3D.C
+
+	//slog("touching me.... touching youuuuuuuu");
+
 	Obj *objPlayer,*objFloor,*objWall, *objCube;  //World/player objects
     Sprite *textPlayer,*textFloor,*textWall,*textCube;   //World/player Sprites
 

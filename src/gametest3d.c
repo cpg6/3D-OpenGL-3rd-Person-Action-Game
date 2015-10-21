@@ -21,6 +21,9 @@
 #include <math.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <SDL_mixer.h>
+#include <SDL_audio.h>
+#include "string.h"
 #include "mgl_callback.h"
 #include "simple_logger.h"
 #include "graphics3d.h"
@@ -40,15 +43,21 @@ Entity *newPlayer(Vec3D position,const char *name);
 Entity *newFloor(Vec3D position,const char *name);
 Entity *newWall(Vec3D position,const char *name);
 Entity *newObstacle(Vec3D position,const char *name);
+Entity *newEnemy(Vec3D position,const char *name, int health, int attack, Sprite *texture);
+Entity *newArrow(Vec3D position, const char *name, int powerAttack); //0 for no, 1 for yes
 void touch_callback(void *data, void *context);
 char bGameLoopRunning = 1;
 SDL_Event e;
 Vec3D cameraPosition = {0,0,1};
 Vec3D cameraRotation = {90,0,0};
 Vec3D cameraPlayerOffset = {0,-3,2};
-Vec3D newCameraPosition;
-Entity *player, *arenaWall, *arenaFloor, *arenaObstacle[10];
-
+Vec3D newCameraPosition, newArrowPos, arrowOffset = {0,3,1};
+Entity *player, *arenaWall, *arenaFloor, *arenaObstacle[10], 
+	*arenaEnemy1, *arenaEnemy2, *arenaEnemy3, *Arrow;
+Sprite *enemy1, *enemy2, *enemy3;
+Space *space;
+Mix_Chunk *explosionEffect, *bowEffect, *deathEffect;
+float red = 125, green = 250, blue = 150;
 int xMouse, yMouse, xAxis, yAxis;
 int xhigh = 720, xlow = 0;
 int yhigh = 135, ylow = 45;
@@ -56,14 +65,16 @@ int yhigh = 135, ylow = 45;
 float maxXVeloc = .5, maxYVeloc = .5, maxZVeloc = .5;
 float minXVeloc = -.5, minYVeloc = -.5, minZVeloc = -.5;
 
+//bowEffect = Mix_LoadWAV("sounds/bow.wav");
+//explosionEffect = Mix_LoadWAV("sounds/explosion.wav");
+//deathEffect = Mix_LoadWAV("sounds/death.wav");
+
 int main(int argc, char *argv[])
 {
-	int j = 0, k = -50, i=0;
+	int j = 0, k = -50, i=0, d = -30, c = 10;
     GLuint vao;
-	Space *space;
     float r = 0;
     GLuint triangleBufferObject;
-	
 
     const float triangleVertices[] = {
         0.0f, 0.5f, 0.0f, 1.0f,
@@ -83,6 +94,10 @@ int main(int argc, char *argv[])
     model_init();
     obj_init();
 	entity_init(255);
+
+	enemy1 = LoadSprite("models/enemy1_text.png",1024,1024);
+	enemy2 = LoadSprite("models/enemy2_text.png",1024,1024);
+	enemy3 = LoadSprite("models/enemy3_text.png",1024,1024);
     
     glGenVertexArrays(1, &vao);
     glBindVertexArray(vao); //make our vertex array object, we need it to restore state we set after binding it. Re-binding reloads the state associated with it.
@@ -100,6 +115,14 @@ int main(int argc, char *argv[])
 		arenaObstacle[j] = newObstacle(vec3d(k,k,4),"Obstacle");
 		k += 10;
 	}
+		
+	arenaEnemy1 = newEnemy(vec3d(d,c,2.0),"Enemy1", 30, 1, enemy1);
+	d += 5;
+	c -= 5;
+	arenaEnemy2 = newEnemy(vec3d(d,c,2.0),"Enemy2", 60, 1, enemy2);
+	d += 5;
+	c -= 5;
+	arenaEnemy3 = newEnemy(vec3d(d,c,2.0),"Enemy3", 90, 1, enemy3);
 
 	space = space_new();
     space_set_steps(space,100);
@@ -107,6 +130,14 @@ int main(int argc, char *argv[])
     space_add_body(space,&player->body);
 	for(j = 0; j < 10; j++)
 		space_add_body(space,&arenaObstacle[j]->body);
+	space_add_body(space,&arenaEnemy1->body);
+	space_add_body(space,&arenaEnemy2->body);
+	space_add_body(space,&arenaEnemy3->body);
+
+	Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 4096);
+	explosionEffect = Mix_LoadWAV("sounds/explosion.wav");
+	bowEffect = Mix_LoadWAV("sounds/bow.wav");
+	deathEffect = Mix_LoadWAV("sounds/death.wav");
 
     while (bGameLoopRunning) //Main Loop
     {
@@ -117,11 +148,14 @@ int main(int argc, char *argv[])
         }
 		pollEvents();
         graphics3d_frame_begin();
-
+		
         vec3d_add(newCameraPosition,player->position,cameraPlayerOffset);	//Update camera position 
 		set_camera(newCameraPosition,player->rotation);						//Apply camera to new snap point
 
-		vec3d_cpy(player->position,player->body.position);					//update mesh position to body position
+		vec3d_cpy(player->position,player->body.position);					//update mesh position to body for player
+		if (Arrow != NULL)
+			vec3d_cpy(Arrow->position,Arrow->body.position);				//Update mesh position to body for the arrow
+
 		if(player->body.velocity.x > 0)										// slow down on x, y, and z
 			player->body.velocity.x -= .008;
 		if(player->body.velocity.x < 0)										// slow down on x, y, and z
@@ -136,6 +170,7 @@ int main(int argc, char *argv[])
 			player->body.position.z -= .064;
 		if(player->body.position.z <= 2)									//Prevent floor clipping
 				player->body.position.z = 2;
+		
         glPushMatrix();
 
 		entity_draw_all();
@@ -144,6 +179,7 @@ int main(int argc, char *argv[])
         /* drawing code above here! */
         graphics3d_next_frame();
     } 
+	Mix_Quit();
     return 0;
 }
 
@@ -157,9 +193,261 @@ void touch_callback(void *data, void *context)
     if (entity_is_entity(obody->touch.data))
     {
         other = (Entity *)obody->touch.data;
-        slog("%s is ",other->name);
+        //slog("other is: %s",other->name);
+		//slog("me is: %s",me->name);
+		//slog("name: %s",Arrow->name);
+		if(strcmp(me->name, "Arrow")==0)
+		{
+			if(strcmp(other->name,"Obstacle")==0)
+			{
+				// do nothing and destroy self
+				slog("Arrow destroyed");
+				space_remove_body(space, &Arrow->body);
+				entity_free(Arrow);
+				memset(&Arrow,0,sizeof(Entity));
+				Mix_PlayChannel(-1,explosionEffect, 0);
+				
+			}
+
+			if(strcmp(other->name,"Enemy1")==0)
+			{
+				
+				if(Arrow->usesOMana == 1)
+					arenaEnemy1->health -= 50;
+				else
+					arenaEnemy1->health -= 35;
+				
+				space_remove_body(space, &Arrow->body);
+				entity_free(Arrow);
+				memset(&Arrow,0,sizeof(Entity));
+				Mix_PlayChannel(-1,explosionEffect, 0);
+				slog("Arrow destroyed1");
+				slog("Enemy1 HP: %i",arenaEnemy1->health);
+				
+				if (arenaEnemy1->health <= 0)
+				{
+					space_remove_body(space, &arenaEnemy1->body);
+					entity_free(arenaEnemy1);
+					Mix_PlayChannel(-1,deathEffect, 0);
+					//memset(&arenaEnemy1,0,sizeof(Entity));
+				}
+				
+			}
+
+			if(strcmp(other->name,"Enemy2")==0)
+			{
+				
+				if(Arrow->usesOMana == 1)
+					arenaEnemy2->health -= 50;
+				else
+					arenaEnemy2->health -= 35;
+				
+				space_remove_body(space, &Arrow->body);
+				entity_free(Arrow);
+				memset(&Arrow,0,sizeof(Entity));
+				Mix_PlayChannel(-1,explosionEffect, 0);
+				slog("Arrow destroyed2");
+				slog("Enemy2 HP: %i",arenaEnemy2->health);
+				
+				if (arenaEnemy2->health <= 0)
+				{
+					space_remove_body(space, &arenaEnemy2->body);
+					entity_free(arenaEnemy2);
+					Mix_PlayChannel(-1,deathEffect, 0);
+					//memset(&arenaEnemy2,0,sizeof(Entity));
+				}
+				
+			}
+
+			if(strcmp(other->name,"Enemy3")==0)
+			{
+				
+				if(me->usesOMana == 1)
+					arenaEnemy3->health -= 50;
+				else
+					arenaEnemy3->health -= 35;
+					
+				space_remove_body(space, &Arrow->body);
+				entity_free(Arrow);
+				memset(&Arrow,0,sizeof(Entity));
+				Mix_PlayChannel(-1,explosionEffect, 0);
+				slog("Arrow destroyed3");
+				slog("Enemy3 HP: %i",arenaEnemy3->health);
+				
+				if (arenaEnemy3->health <= 0)
+				{
+					space_remove_body(space, &arenaEnemy3->body);
+					entity_free(arenaEnemy3);
+					Mix_PlayChannel(-1,deathEffect, 0);
+					//memset(&arenaEnemy3,0,sizeof(Entity));
+				}
+				
+			}
+
+		}
     }
-    slog("touching me.... touching youuuuuuuu");
+    
+}
+
+Entity *newArrow(Vec3D position, const char *name, int powerAttack)
+{
+	Entity * ent;
+    char buffer[255];
+    int i;
+    ent = entity_new();
+    if (!ent)
+    {
+        return NULL;
+    }
+    ent->objModel = obj_load("models/arrow.obj");
+    ent->texture = LoadSprite("models/arrow_text.png",1024,1024);
+	ent->usesOMana = powerAttack;
+	strcpy(ent->name, name);
+	vec3d_cpy(ent->position,position);
+    vec3d_cpy(ent->body.position,ent->position);
+    cube_set(ent->body.bounds,0,0,0,.5,.5,.5);
+    ent->rotation.x = 90;
+	ent->rotation.z = 360;
+    sprintf(ent->name,"%s",name);
+    //ent->think = think;
+    mgl_callback_set(&ent->body.touch,touch_callback,ent);
+    return ent;
+}
+
+Entity *newPlayer(Vec3D position,const char *name)
+{
+    Entity * ent;
+    char buffer[255];
+    int i;
+    ent = entity_new();
+    if (!ent)
+    {
+        return NULL;
+    }
+	ent->uid = 1;
+    ent->objModel = obj_load("models/cube.obj");
+    ent->texture = LoadSprite("models/cube_text.png",1024,1024);
+	ent->health = 100;
+	ent->offensiveMana = 50;
+	strcpy(ent->name, name);
+	vec3d_cpy(ent->position,position);
+    vec3d_cpy(ent->body.position,ent->position);
+    cube_set(ent->body.bounds,-1,-1,-1,2,2,2);
+    ent->rotation.x = 90;
+	ent->rotation.z = 360;
+    sprintf(ent->name,"%s",name);
+    //ent->think = think;
+    mgl_callback_set(&ent->body.touch,touch_callback,ent);
+    return ent;
+}
+
+Entity *newEnemy(Vec3D position,const char *name, int health, int attack, Sprite *texture)
+{
+	Entity * ent;
+    char buffer[255];
+    int i, alpha = 255;
+    ent = entity_new();
+	
+    if (!ent)
+    {
+        return NULL;
+    }
+    ent->objModel = obj_load("models/cube.obj");
+    ent->texture = texture;
+	ent->health = health;
+	ent->attack = attack;
+	strcpy(ent->name, name);
+	vec3d_cpy(ent->position,position);
+    vec3d_cpy(ent->body.position,ent->position);
+    cube_set(ent->body.bounds,-1,-1,-1,2,2,2);
+    ent->rotation.x = 90;
+	ent->rotation.z = 360;
+    sprintf(ent->name,"%s",name);
+    //ent->think = think;
+    mgl_callback_set(&ent->body.touch,touch_callback,ent);
+    return ent;
+}
+
+Entity *newFloor(Vec3D position,const char *name)
+{
+    Entity * ent;
+    char buffer[255];
+    int i;
+    ent = entity_new();
+    if (!ent)
+    {
+        return NULL;
+    }
+	ent->uid = 2;
+    ent->objModel = obj_load("models/arena_floor.obj");
+    ent->texture = LoadSprite("models/arena_floor_text.png",1024,1024);
+	vec3d_cpy(ent->position,position);
+    vec3d_cpy(ent->body.position,position);
+	strcpy(ent->name, name);
+    //cube_set(ent->body.bounds,-80,-80,1,2,2,2);
+    ent->rotation.x = 90;
+	ent->rotation.y = 90;
+    sprintf(ent->name,"%s",name);
+    //ent->think = think;
+    mgl_callback_set(&ent->body.touch,touch_callback,ent);
+    return ent;
+}
+
+Entity *newWall(Vec3D position,const char *name)
+{
+    Entity * ent;
+    char buffer[255];
+    int i;
+    ent = entity_new();
+    if (!ent)
+    {
+        return NULL;
+    }
+	ent->uid = 3;
+    ent->objModel = obj_load("models/arena_wall.obj");
+    ent->texture = LoadSprite("models/arena_wall_text.png",1024,1024);
+	vec3d_cpy(ent->position,position);
+    vec3d_cpy(ent->body.position,position);
+	strcpy(ent->name, name);
+    //cube_set(ent->body.bounds,0,0,0,0,0,0); Dont neeed for this
+    ent->rotation.x = 90;
+	ent->rotation.y = 90;
+    sprintf(ent->name,"%s",name);
+    //ent->think = think;
+    mgl_callback_set(&ent->body.touch,touch_callback,ent);
+    return ent;
+}
+
+Entity *newObstacle(Vec3D position,const char *name)
+{
+    Entity * ent;
+    char buffer[255];
+	ent = entity_new();
+	if (!ent)
+	{
+		return NULL;
+	}
+	ent->objModel = obj_load("models/arena_cube.obj");
+	ent->texture = LoadSprite("models/arena_cube_text.png",1024,1024);
+	vec3d_cpy(ent->position,position);
+	vec3d_cpy(ent->body.position,ent->position);
+	cube_set(ent->body.bounds,-2,-2,-2,5,5,5);
+	strcpy(ent->name, name);
+	ent->rotation.x = 90;
+	ent->rotation.y = 90;
+	sprintf(ent->name,"%s",name);
+	mgl_callback_set(&ent->body.touch,touch_callback,ent);
+	return ent;
+}
+
+void set_camera(Vec3D position, Vec3D rotation)
+{
+    glRotatef(-rotation.x, 1.0f, 0.0f, 0.0f);
+    glRotatef(-rotation.y, 0.0f, 1.0f, 0.0f);
+    glRotatef(-rotation.z, 0.0f, 0.0f, 1.0f);
+    glTranslatef(-position.x,
+                 -position.y,
+                 -position.z);
 }
 
 void pollEvents()
@@ -238,111 +526,45 @@ void pollEvents()
 					}
 				}
             }
-        }
-}
-
-Entity *newPlayer(Vec3D position,const char *name)
-{
-    Entity * ent;
-    char buffer[255];
-    int i;
-    ent = entity_new();
-    if (!ent)
-    {
-        return NULL;
-    }
-	ent->uid = 1;
-    ent->objModel = obj_load("models/cube.obj");
-    ent->texture = LoadSprite("models/cube_text.png",1024,1024);
-	ent->health = 100;
-	vec3d_cpy(ent->position,position);
-    vec3d_cpy(ent->body.position,ent->position);
-    cube_set(ent->body.bounds,-1,-1,-1,2,2,2);
-    ent->rotation.x = 90;
-	ent->rotation.z = 360;
-    sprintf(ent->name,"%s",name);
-    //ent->think = think;
-    mgl_callback_set(&ent->body.touch,touch_callback,ent);
-    return ent;
-}
-
-Entity *newFloor(Vec3D position,const char *name)
-{
-    Entity * ent;
-    char buffer[255];
-    int i;
-    ent = entity_new();
-    if (!ent)
-    {
-        return NULL;
-    }
-	ent->uid = 2;
-    ent->objModel = obj_load("models/arena_floor.obj");
-    ent->texture = LoadSprite("models/arena_floor_text.png",1024,1024);
-	vec3d_cpy(ent->position,position);
-    vec3d_cpy(ent->body.position,position);
-    //cube_set(ent->body.bounds,-80,-80,1,2,2,2);
-    ent->rotation.x = 90;
-	ent->rotation.y = 90;
-    sprintf(ent->name,"%s",name);
-    //ent->think = think;
-    mgl_callback_set(&ent->body.touch,touch_callback,ent);
-    return ent;
-}
-
-Entity *newWall(Vec3D position,const char *name)
-{
-    Entity * ent;
-    char buffer[255];
-    int i;
-    ent = entity_new();
-    if (!ent)
-    {
-        return NULL;
-    }
-	ent->uid = 3;
-    ent->objModel = obj_load("models/arena_wall.obj");
-    ent->texture = LoadSprite("models/arena_wall_text.png",1024,1024);
-	vec3d_cpy(ent->position,position);
-    vec3d_cpy(ent->body.position,position);
-    //cube_set(ent->body.bounds,0,0,0,0,0,0); Dont neeed for this
-    ent->rotation.x = 90;
-	ent->rotation.y = 90;
-    sprintf(ent->name,"%s",name);
-    //ent->think = think;
-    mgl_callback_set(&ent->body.touch,touch_callback,ent);
-    return ent;
-}
-
-Entity *newObstacle(Vec3D position,const char *name)
-{
-    Entity * ent;
-    char buffer[255];
-	ent = entity_new();
-	if (!ent)
-	{
-		return NULL;
+			if (e.button.button == SDL_BUTTON_LEFT)
+			{
+				if(Arrow != NULL)
+				{
+					//Already in use
+					continue;
+				}
+				else
+				{
+					vec3d_add(newArrowPos,player->body.position,arrowOffset);
+					Arrow = newArrow(newArrowPos,"Arrow", 0);
+					space_add_body(space,&Arrow->body);
+					Arrow->body.velocity.y = 3;
+					Mix_PlayChannel(-1,bowEffect, 0);
+				}
+			}
+			if (e.button.button == SDL_BUTTON_RIGHT)
+			{
+				if(Arrow != NULL)
+				{
+					//Already in use
+					continue;
+				}
+				else
+				{
+					if(player->offensiveMana >= 10)
+					{
+						vec3d_add(newArrowPos,player->body.position,arrowOffset);
+						Arrow = newArrow(newArrowPos,"Arrow", 1);
+						space_add_body(space,&Arrow->body);
+						Arrow->body.velocity.y = 3;
+						player->offensiveMana -= 10;
+						if(player->offensiveMana < 0)
+							player->offensiveMana = 0;
+						Mix_PlayChannel(-1,bowEffect, 0);
+					}
+				}
+			}
 	}
-	ent->objModel = obj_load("models/arena_cube.obj");
-	ent->texture = LoadSprite("models/arena_cube_text.png",1024,1024);
-	vec3d_cpy(ent->position,position);
-	vec3d_cpy(ent->body.position,ent->position);
-	cube_set(ent->body.bounds,-2,-2,-2,5,5,5);
-	ent->rotation.x = 90;
-	ent->rotation.y = 90;
-	sprintf(ent->name,"%s",name);
-	mgl_callback_set(&ent->body.touch,touch_callback,ent);
-	return ent;
-}
-
-void set_camera(Vec3D position, Vec3D rotation)
-{
-    glRotatef(-rotation.x, 1.0f, 0.0f, 0.0f);
-    glRotatef(-rotation.y, 0.0f, 1.0f, 0.0f);
-    glRotatef(-rotation.z, 0.0f, 0.0f, 1.0f);
-    glTranslatef(-position.x,
-                 -position.y,
-                 -position.z);
 }
 
 /*eol@eof*/
