@@ -155,6 +155,14 @@ int main(int argc, char *argv[])
 		vec3d_cpy(player->position,player->body.position);					//update mesh position to body for player
 		if (Arrow != NULL)
 			vec3d_cpy(Arrow->position,Arrow->body.position);				//Update mesh position to body for the arrow
+		if (Arrow!=NULL && Arrow->body.position.y > 100)
+		{
+			slog("Arrow destroyed");
+			space_remove_body(space, &Arrow->body);
+			entity_free(Arrow);
+			memset(&Arrow,0,sizeof(Entity));
+			Mix_PlayChannel(-1,explosionEffect, 0);
+		}
 
 		if(player->body.velocity.x > 0)										// slow down on x, y, and z
 			player->body.velocity.x -= .008;
