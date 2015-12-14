@@ -9,6 +9,8 @@ static SDL_Window  * __graphics3d_window = NULL;
 static GLuint        __graphics3d_shader_program;
 static Uint32        __graphics3d_frame_delay = 33;
 
+
+
 void graphics3d_close();
 
 GLuint graphics3d_get_shader_program()
@@ -79,7 +81,7 @@ int graphics3d_init(int sw,int sh,int fullscreen,const char *project,Uint32 fram
     glLoadIdentity();
     /*view angle, aspect ratio, near clip distance, far clip distance*/
     /*TODO: put near/far clip in graphics view config*/
-    gluPerspective( 40, (float)sw / (float)sh, .01, 2000.0f);
+    gluPerspective( 90, (float)sw / (float)sh, .01, 2000.0f);
     glMatrixMode( GL_MODELVIEW );
     glLoadIdentity();
 

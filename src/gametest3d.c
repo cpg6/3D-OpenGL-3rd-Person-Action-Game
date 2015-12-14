@@ -23,6 +23,8 @@
 #include <stdio.h>
 #include <SDL_mixer.h>
 #include <SDL_audio.h>
+#include <SDL.h>
+#include <SDL_mouse.h>
 #include "string.h"
 #include "mgl_callback.h"
 #include "simple_logger.h"
@@ -39,13 +41,16 @@
 void set_camera(Vec3D position, Vec3D rotation);
 void pollEvents();
 void updateBounds();
+void touch_callback(void *data, void *context);
+void drawHealthBar();
+void playerMove();
+void playerRotate();
 Entity *newPlayer(Vec3D position,const char *name);
 Entity *newFloor(Vec3D position,const char *name);
 Entity *newWall(Vec3D position,const char *name);
 Entity *newObstacle(Vec3D position,const char *name);
 Entity *newEnemy(Vec3D position,const char *name, int health, int attack, Sprite *texture);
 Entity *newArrow(Vec3D position, const char *name, int powerAttack); //0 for no, 1 for yes
-void touch_callback(void *data, void *context);
 char bGameLoopRunning = 1;
 SDL_Event e;
 Vec3D cameraPosition = {0,0,1};
@@ -58,13 +63,15 @@ Sprite *enemy1, *enemy2, *enemy3;
 Space *space;
 Mix_Chunk *explosionEffect, *bowEffect, *deathEffect;
 float red = 125, green = 250, blue = 150;
-int xMouse, yMouse, xAxis, yAxis;
+GLfloat xAxis, yAxis;
+int xMouse, yMouse; 
 int xhigh = 720, xlow = 0;
 int yhigh = 135, ylow = 45;
-
+int playerRotating = 0;
+int playerMoving = 0;
 float maxXVeloc = .5, maxYVeloc = .5, maxZVeloc = .5;
 float minXVeloc = -.5, minYVeloc = -.5, minZVeloc = -.5;
-
+Vec3D direction;
 //bowEffect = Mix_LoadWAV("sounds/bow.wav");
 //explosionEffect = Mix_LoadWAV("sounds/explosion.wav");
 //deathEffect = Mix_LoadWAV("sounds/death.wav");
@@ -73,9 +80,9 @@ int main(int argc, char *argv[])
 {
 	int j = 0, k = -50, i=0, d = -30, c = 10;
     GLuint vao;
+	Vec3D newCamRotation;
     float r = 0;
     GLuint triangleBufferObject;
-
     const float triangleVertices[] = {
         0.0f, 0.5f, 0.0f, 1.0f,
         0.5f, -0.366f, 0.0f, 1.0f,
@@ -106,7 +113,9 @@ int main(int argc, char *argv[])
     glBindBuffer(GL_ARRAY_BUFFER, triangleBufferObject); //we're "using" this one now
     glBufferData(GL_ARRAY_BUFFER, sizeof(triangleVertices), triangleVertices, GL_STATIC_DRAW); //formatting the data for the buffer
     glBindBuffer(GL_ARRAY_BUFFER, 0); //unbind any buffers
-    
+   // SDL_ShowCursor(SDL_DISABLE); //disable the mouse cursor on the game screen
+	//SDL_SetRelativeMouseMode(SDL_TRUE); //Set the relative mouse mode to lock mouse to center of screen
+
 	player = newPlayer(vec3d(10,-5,2),"Player1");
 	arenaWall = newWall(vec3d(0,0,0),"Wall");
 	arenaFloor = newFloor(vec3d(0,0,0),"Floor");
@@ -138,6 +147,7 @@ int main(int argc, char *argv[])
 	explosionEffect = Mix_LoadWAV("sounds/explosion.wav");
 	bowEffect = Mix_LoadWAV("sounds/bow.wav");
 	deathEffect = Mix_LoadWAV("sounds/death.wav");
+	SDL_WarpMouseInWindow(NULL, 1024/2,768/2);
 
     while (bGameLoopRunning) //Main Loop
     {
@@ -146,13 +156,14 @@ int main(int argc, char *argv[])
         {
             space_do_step(space);
         }
+		
 		pollEvents();
+		SDL_WarpMouseInWindow(NULL, 1024/2,768/2);
+
         graphics3d_frame_begin();
 		
-        vec3d_add(newCameraPosition,player->position,cameraPlayerOffset);	//Update camera position 
-		set_camera(newCameraPosition,player->rotation);						//Apply camera to new snap point
+		//TODO: Insert flag check to call playerRotate and playerMove for after frame begin
 
-		vec3d_cpy(player->position,player->body.position);					//update mesh position to body for player
 		if (Arrow != NULL)
 			vec3d_cpy(Arrow->position,Arrow->body.position);				//Update mesh position to body for the arrow
 		if (Arrow!=NULL && Arrow->body.position.y > 100)
@@ -163,15 +174,15 @@ int main(int argc, char *argv[])
 			memset(&Arrow,0,sizeof(Entity));
 			Mix_PlayChannel(-1,explosionEffect, 0);
 		}
-
+		
 		if(player->body.velocity.x > 0)										// slow down on x, y, and z
-			player->body.velocity.x -= .008;
+			player->body.velocity.x -= .028;
 		if(player->body.velocity.x < 0)										// slow down on x, y, and z
-			player->body.velocity.x += .008;
+			player->body.velocity.x += .028;
 		if(player->body.velocity.y > 0)
-			player->body.velocity.y -= .008;
+			player->body.velocity.y -= .028;
 		if(player->body.velocity.y < 0)
-			player->body.velocity.y += .008;
+			player->body.velocity.y += .028;
 		if(player->body.velocity.z > 0)
 			player->body.velocity.z -= .064;
 		if(player->body.position.z > 2)
@@ -179,11 +190,35 @@ int main(int argc, char *argv[])
 		if(player->body.position.z <= 2)									//Prevent floor clipping
 				player->body.position.z = 2;
 		
-        glPushMatrix();
-
-		entity_draw_all();
 		
+
+
+        glPushMatrix();
+		if(playerRotating > 0)
+		{
+			//glPushMatrix();
+			//glRotatef(xAxis, 0.0f,1.0f,0.0f);
+			if(player->rotation.y + xAxis >= xhigh)
+				player->rotation.y = xhigh;
+			else if(player->rotation.y + xAxis <= xlow)
+				player->rotation.y = xlow;
+			else
+				player->rotation.y += xAxis;
+
+			//entity_draw(player);
+			//glPopMatrix();
+			playerRotating = 0;
+			slog("the value is %f", xAxis);
+		}
+		glPopMatrix();
+		glPushMatrix();
+		vec3d_add(newCameraPosition,player->position,vec3d(sin(player->rotation.y * DEGTORAD),-cos(player->rotation.y * DEGTORAD),2));	//Update camera position 
+		vec3d_updateCam(newCamRotation, player->rotation);					//Fix messed up rotations between player/camera
+		set_camera(newCameraPosition,newCamRotation);						//Apply camera to new snap point
+		vec3d_cpy(player->position,player->body.position);					//update mesh position to body for player
+		entity_draw_all();
         glPopMatrix();
+
         /* drawing code above here! */
         graphics3d_next_frame();
     } 
@@ -295,7 +330,7 @@ void touch_callback(void *data, void *context)
 		}
     }
     
-}
+} //Collision checks
 
 Entity *newArrow(Vec3D position, const char *name, int powerAttack)
 {
@@ -460,6 +495,9 @@ void set_camera(Vec3D position, Vec3D rotation)
 
 void pollEvents()
 {
+	//playerRotating = 1;
+	//playerMoving = 0;
+	float xrad, yrad;
 	while ( SDL_PollEvent(&e) ) 
         {
             if (e.type == SDL_QUIT)
@@ -469,18 +507,26 @@ void pollEvents()
 			
 			if (e.type == SDL_MOUSEMOTION)
 			{
-
+				playerRotating = 1;
 				SDL_GetMouseState(&xMouse, &yMouse);
+				
+				xAxis = (512 - xMouse) * .625;
+				yAxis = (384 - yMouse) * .625;
+				
+				xrad = (512 - xMouse) / 512.0 * 3.14 / 2.0;
+				yrad = (384 - yMouse) / 384.0 * 3.14 / 2.0;
 
-				xAxis = ((1024/2) - xMouse) * .00625;
-				yAxis = ((768/2) - yMouse) * .00625;
+				direction.x = cos(yrad) * sin(xrad);
+				direction.y = sin(yrad);
+				direction.z = 0;
 
-				if(player->rotation.z + xAxis >= xhigh)
-					player->rotation.z = xhigh;
-				else if(player->rotation.z + xAxis <= xlow)
-					player->rotation.z = xlow;
+				/*
+				if(player->rotation.y + xAxis >= xhigh)
+					player->rotation.y = xhigh;
+				else if(player->rotation.y + xAxis <= xlow)
+					player->rotation.y = xlow;
 				else
-					player->rotation.z += xAxis;
+					player->rotation.y += xAxis;
 
 				if(player->rotation.x + yAxis >= yhigh)
 					player->rotation.x = yhigh;
@@ -488,38 +534,45 @@ void pollEvents()
 					player->rotation.x = ylow;
 				else
 					player->rotation.x += yAxis;
+					*/
 			}
-			
+			//vec3d(-sin(player->rotation.z * DEGTORAD),cos(player->rotation.z * DEGTORAD),0);
             else if (e.type == SDL_KEYDOWN)
             {
 				switch(e.key.keysym.sym)
 				{
 					case SDLK_w:
 					{
-						player->body.velocity.y += .1;
-						if(player->body.velocity.y > maxYVeloc)
-							player->body.velocity.y = maxYVeloc;
+						player->body.velocity = vec3d(-sin(player->rotation.y * DEGTORAD),cos(player->rotation.y * DEGTORAD),0);
+						//player->body.velocity.x = 20 * direction.x;
+						//player->body.velocity.y = 20 * direction.y;
+						//player->body.velocity.z = 20 * direction.z;
+						//if(player->body.velocity.y > maxYVeloc)
+							//player->body.velocity.y = maxYVeloc;
 						break;
 					}
 					case SDLK_a:
 					{
-						player->body.velocity.x += -.1;
-						if(player->body.velocity.x < minXVeloc)
-							player->body.velocity.x = minXVeloc;
+						player->body.velocity = vec3d(-cos(player->rotation.y * DEGTORAD),-sin(player->rotation.y * DEGTORAD),0);
+						//player->body.velocity.x += -.1;
+						//if(player->body.velocity.x < minXVeloc)
+							//player->body.velocity.x = minXVeloc;
 						break;
 					}
 					case SDLK_s:
 					{
-						player->body.velocity.y += -.1;
-						if(player->body.velocity.y < minYVeloc)
-							player->body.velocity.y = minYVeloc;
+						player->body.velocity = vec3d(sin(player->rotation.y * DEGTORAD),-cos(player->rotation.y * DEGTORAD),0);
+						//player->body.velocity.y += -.1;
+						//if(player->body.velocity.y < minYVeloc)
+							//player->body.velocity.y = minYVeloc;
 						break;
 					}
 					case SDLK_d:
 					{
-						player->body.velocity.x += .1;
-						if(player->body.velocity.x > maxXVeloc)
-							player->body.velocity.x = maxXVeloc;
+						player->body.velocity = vec3d(cos(player->rotation.y * DEGTORAD),sin(player->rotation.y * DEGTORAD),0);
+						//player->body.velocity.x += .1;
+						//if(player->body.velocity.x > maxXVeloc)
+							//player->body.velocity.x = maxXVeloc;
 						break;
 					}
 					case SDLK_SPACE:
@@ -543,6 +596,7 @@ void pollEvents()
 				}
 				else
 				{
+					//vec3d(-sin(player->rotation.y * DEGTORAD),cos(player->rotation.y * DEGTORAD),0);
 					vec3d_add(newArrowPos,player->body.position,arrowOffset);
 					Arrow = newArrow(newArrowPos,"Arrow", 0);
 					space_add_body(space,&Arrow->body);
@@ -573,6 +627,23 @@ void pollEvents()
 				}
 			}
 	}
+}
+
+void drawHealthBar()
+{
+
+}
+
+void playerRotate()
+{
+	// need the angle for rotation
+
+
+}
+
+void playerMove()
+{
+
 }
 
 /*eol@eof*/
