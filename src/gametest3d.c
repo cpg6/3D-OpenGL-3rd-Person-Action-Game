@@ -56,7 +56,8 @@ SDL_Event e;
 Vec3D cameraPosition = {0,0,1};
 Vec3D cameraRotation = {90,0,0};
 Vec3D cameraPlayerOffset = {0,-3,2};
-Vec3D newCameraPosition, newArrowPos, arrowOffset = {0,3,1};
+Vec3D camOffset, finalMove;
+Vec3D newCameraPosition, newArrowPos,arrowFinal, arrowOffset = {0,3,1};
 Entity *player, *arenaWall, *arenaFloor, *arenaObstacle[10], 
 	*arenaEnemy1, *arenaEnemy2, *arenaEnemy3, *Arrow;
 Sprite *enemy1, *enemy2, *enemy3;
@@ -113,7 +114,7 @@ int main(int argc, char *argv[])
     glBindBuffer(GL_ARRAY_BUFFER, triangleBufferObject); //we're "using" this one now
     glBufferData(GL_ARRAY_BUFFER, sizeof(triangleVertices), triangleVertices, GL_STATIC_DRAW); //formatting the data for the buffer
     glBindBuffer(GL_ARRAY_BUFFER, 0); //unbind any buffers
-   // SDL_ShowCursor(SDL_DISABLE); //disable the mouse cursor on the game screen
+	SDL_ShowCursor(SDL_DISABLE); //disable the mouse cursor on the game screen
 	//SDL_SetRelativeMouseMode(SDL_TRUE); //Set the relative mouse mode to lock mouse to center of screen
 
 	player = newPlayer(vec3d(10,-5,2),"Player1");
@@ -125,13 +126,13 @@ int main(int argc, char *argv[])
 		k += 10;
 	}
 		
-	arenaEnemy1 = newEnemy(vec3d(d,c,2.0),"Enemy1", 30, 1, enemy1);
+	arenaEnemy1 = newEnemy(vec3d(d,c,2.5),"Enemy1", 30, 1, enemy1);
 	d += 5;
 	c -= 5;
-	arenaEnemy2 = newEnemy(vec3d(d,c,2.0),"Enemy2", 60, 1, enemy2);
+	arenaEnemy2 = newEnemy(vec3d(d,c,2.5),"Enemy2", 60, 1, enemy2);
 	d += 5;
 	c -= 5;
-	arenaEnemy3 = newEnemy(vec3d(d,c,2.0),"Enemy3", 90, 1, enemy3);
+	arenaEnemy3 = newEnemy(vec3d(d,c,2.5),"Enemy3", 90, 1, enemy3);
 
 	space = space_new();
     space_set_steps(space,100);
@@ -165,28 +166,37 @@ int main(int argc, char *argv[])
 		//TODO: Insert flag check to call playerRotate and playerMove for after frame begin
 
 		if (Arrow != NULL)
-			vec3d_cpy(Arrow->position,Arrow->body.position);				//Update mesh position to body for the arrow
-		if (Arrow!=NULL && Arrow->body.position.y > 100)
 		{
-			slog("Arrow destroyed");
-			space_remove_body(space, &Arrow->body);
-			entity_free(Arrow);
-			memset(&Arrow,0,sizeof(Entity));
-			Mix_PlayChannel(-1,explosionEffect, 0);
+			vec3d_cpy(Arrow->position,Arrow->body.position);				//Update mesh position to body for the arrow
+			if (Arrow->body.position.y > 100 || Arrow->body.position.x > 100 || Arrow->body.position.y < -100 || Arrow->body.position.x < -100)
+			{ 
+					slog("Arrow destroyed");
+					space_remove_body(space, &Arrow->body);
+					entity_free(Arrow);
+					memset(&Arrow,0,sizeof(Entity));
+					Mix_PlayChannel(-1,explosionEffect, 0);
+			}
 		}
-		
+
 		if(player->body.velocity.x > 0)										// slow down on x, y, and z
-			player->body.velocity.x -= .028;
-		if(player->body.velocity.x < 0)										// slow down on x, y, and z
-			player->body.velocity.x += .028;
+			player->body.velocity.x -= .008;
+		else if(player->body.velocity.x < 0)								// slow down on x, y, and z
+			player->body.velocity.x += .008;
+		else 
+			player->body.velocity.x = 0;
+
 		if(player->body.velocity.y > 0)
-			player->body.velocity.y -= .028;
-		if(player->body.velocity.y < 0)
-			player->body.velocity.y += .028;
+			player->body.velocity.y -= .008;
+		else if(player->body.velocity.y < 0)
+			player->body.velocity.y += .008;
+		else 
+			player->body.velocity.y = 0;
+
 		if(player->body.velocity.z > 0)
 			player->body.velocity.z -= .064;
-		if(player->body.position.z > 2)
-			player->body.position.z -= .064;
+		else if(player->body.velocity.z >= 2)
+			player->body.velocity.z -= .064;
+
 		if(player->body.position.z <= 2)									//Prevent floor clipping
 				player->body.position.z = 2;
 		
@@ -377,7 +387,7 @@ Entity *newPlayer(Vec3D position,const char *name)
     vec3d_cpy(ent->body.position,ent->position);
     cube_set(ent->body.bounds,-1,-1,-1,2,2,2);
     ent->rotation.x = 90;
-	ent->rotation.z = 360;
+	ent->rotation.z = 0;
     sprintf(ent->name,"%s",name);
     //ent->think = think;
     mgl_callback_set(&ent->body.touch,touch_callback,ent);
@@ -516,9 +526,9 @@ void pollEvents()
 				xrad = (512 - xMouse) / 512.0 * 3.14 / 2.0;
 				yrad = (384 - yMouse) / 384.0 * 3.14 / 2.0;
 
-				direction.x = cos(yrad) * sin(xrad);
-				direction.y = sin(yrad);
-				direction.z = 0;
+				//direction.x = cos(yrad) * sin(xrad);
+				//direction.y = sin(yrad);
+				//direction.z = 0;
 
 				/*
 				if(player->rotation.y + xAxis >= xhigh)
@@ -543,7 +553,9 @@ void pollEvents()
 				{
 					case SDLK_w:
 					{
-						player->body.velocity = vec3d(-sin(player->rotation.y * DEGTORAD),cos(player->rotation.y * DEGTORAD),0);
+						//vec3d_cpy(direction, vec3d(-sin(player->rotation.y * DEGTORAD),cos(player->rotation.y * DEGTORAD),0));
+						//vec3d_scale(finalMove, direction, 1);
+						player->body.velocity = vec3d(-sin(player->rotation.y * DEGTORAD)*.5,cos(player->rotation.y * DEGTORAD)*.5,0);
 						//player->body.velocity.x = 20 * direction.x;
 						//player->body.velocity.y = 20 * direction.y;
 						//player->body.velocity.z = 20 * direction.z;
@@ -553,7 +565,7 @@ void pollEvents()
 					}
 					case SDLK_a:
 					{
-						player->body.velocity = vec3d(-cos(player->rotation.y * DEGTORAD),-sin(player->rotation.y * DEGTORAD),0);
+						player->body.velocity = vec3d(-cos(player->rotation.y * DEGTORAD)*.5,-sin(player->rotation.y * DEGTORAD)*.5,0);
 						//player->body.velocity.x += -.1;
 						//if(player->body.velocity.x < minXVeloc)
 							//player->body.velocity.x = minXVeloc;
@@ -561,7 +573,7 @@ void pollEvents()
 					}
 					case SDLK_s:
 					{
-						player->body.velocity = vec3d(sin(player->rotation.y * DEGTORAD),-cos(player->rotation.y * DEGTORAD),0);
+						player->body.velocity = vec3d(sin(player->rotation.y * DEGTORAD)*.5,-cos(player->rotation.y * DEGTORAD)*.5,0);
 						//player->body.velocity.y += -.1;
 						//if(player->body.velocity.y < minYVeloc)
 							//player->body.velocity.y = minYVeloc;
@@ -569,7 +581,7 @@ void pollEvents()
 					}
 					case SDLK_d:
 					{
-						player->body.velocity = vec3d(cos(player->rotation.y * DEGTORAD),sin(player->rotation.y * DEGTORAD),0);
+						player->body.velocity = vec3d(cos(player->rotation.y * DEGTORAD)*.5,sin(player->rotation.y * DEGTORAD)*.5,0);
 						//player->body.velocity.x += .1;
 						//if(player->body.velocity.x > maxXVeloc)
 							//player->body.velocity.x = maxXVeloc;
@@ -598,9 +610,11 @@ void pollEvents()
 				{
 					//vec3d(-sin(player->rotation.y * DEGTORAD),cos(player->rotation.y * DEGTORAD),0);
 					vec3d_add(newArrowPos,player->body.position,arrowOffset);
+					//vec3d_add(arrowFinal, newArrowPos, ); 
 					Arrow = newArrow(newArrowPos,"Arrow", 0);
 					space_add_body(space,&Arrow->body);
-					Arrow->body.velocity.y = 3;
+					//vec3d_cpy(Arrow->body.position, Arrow->position);
+					Arrow->body.velocity = vec3d(-sin(player->rotation.y * DEGTORAD),cos(player->rotation.y * DEGTORAD),0);
 					Mix_PlayChannel(-1,bowEffect, 0);
 				}
 			}
@@ -618,7 +632,7 @@ void pollEvents()
 						vec3d_add(newArrowPos,player->body.position,arrowOffset);
 						Arrow = newArrow(newArrowPos,"Arrow", 1);
 						space_add_body(space,&Arrow->body);
-						Arrow->body.velocity.y = 3;
+						Arrow->body.velocity = vec3d(-sin(player->rotation.y * DEGTORAD),cos(player->rotation.y * DEGTORAD),0);
 						player->offensiveMana -= 10;
 						if(player->offensiveMana < 0)
 							player->offensiveMana = 0;
