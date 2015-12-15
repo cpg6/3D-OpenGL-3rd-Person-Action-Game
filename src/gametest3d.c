@@ -42,14 +42,11 @@ void set_camera(Vec3D position, Vec3D rotation);
 void pollEvents();
 void updateBounds();
 void touch_callback(void *data, void *context);
-void drawHealthBar();
-void playerMove();
-void playerRotate();
 Entity *newPlayer(Vec3D position,const char *name);
 Entity *newFloor(Vec3D position,const char *name);
 Entity *newWall(Vec3D position,const char *name);
 Entity *newObstacle(Vec3D position,const char *name);
-Entity *newEnemy(Vec3D position,const char *name, int health, int attack, Sprite *texture);
+Entity *newEnemy(Vec3D position,const char *name, int health, int attack);
 Entity *newArrow(Vec3D position, const char *name, int powerAttack); //0 for no, 1 for yes
 char bGameLoopRunning = 1;
 SDL_Event e;
@@ -72,16 +69,15 @@ int playerRotating = 0;
 int playerMoving = 0;
 float maxXVeloc = .5, maxYVeloc = .5, maxZVeloc = .5;
 float minXVeloc = -.5, minYVeloc = -.5, minZVeloc = -.5;
-Vec3D direction;
-//bowEffect = Mix_LoadWAV("sounds/bow.wav");
-//explosionEffect = Mix_LoadWAV("sounds/explosion.wav");
-//deathEffect = Mix_LoadWAV("sounds/death.wav");
+float mag;
+Vec3D direction, enemy1Direction, enemy2Direction, enemy3Direction;
 
 int main(int argc, char *argv[])
 {
 	int j = 0, k = -50, i=0, d = -30, c = 10;
     GLuint vao;
 	Vec3D newCamRotation;
+	int enemy1Radius;
     float r = 0;
     GLuint triangleBufferObject;
     const float triangleVertices[] = {
@@ -103,9 +99,22 @@ int main(int argc, char *argv[])
     obj_init();
 	entity_init(255);
 
-	enemy1 = LoadSprite("models/enemy1_text.png",1024,1024);
-	enemy2 = LoadSprite("models/enemy2_text.png",1024,1024);
-	enemy3 = LoadSprite("models/enemy3_text.png",1024,1024);
+	player = newPlayer(vec3d(10,-5,2),"Player1");
+	arenaWall = newWall(vec3d(0,0,0),"Wall");
+	arenaFloor = newFloor(vec3d(0,0,0),"Floor");
+	for(j = 0; j < 10; j++)
+	{
+		arenaObstacle[j] = newObstacle(vec3d(k,k,4),"Obstacle");
+		k += 10;
+	}
+		
+	arenaEnemy1 = newEnemy(vec3d(d,c,2.5),"Enemy1", 30, 1);
+	d += 5;
+	c -= 5;
+	arenaEnemy2 = newEnemy(vec3d(d,c,2.5),"Enemy2", 60, 1);
+	d += 5;
+	c -= 5;
+	arenaEnemy3 = newEnemy(vec3d(d,c,2.5),"Enemy3", 90, 1);
     
     glGenVertexArrays(1, &vao);
     glBindVertexArray(vao); //make our vertex array object, we need it to restore state we set after binding it. Re-binding reloads the state associated with it.
@@ -116,24 +125,6 @@ int main(int argc, char *argv[])
     glBindBuffer(GL_ARRAY_BUFFER, 0); //unbind any buffers
 	SDL_ShowCursor(SDL_DISABLE); //disable the mouse cursor on the game screen
 	//SDL_SetRelativeMouseMode(SDL_TRUE); //Set the relative mouse mode to lock mouse to center of screen
-
-	player = newPlayer(vec3d(10,-5,2),"Player1");
-	arenaWall = newWall(vec3d(0,0,0),"Wall");
-	arenaFloor = newFloor(vec3d(0,0,0),"Floor");
-	for(j = 0; j < 10; j++)
-	{
-		arenaObstacle[j] = newObstacle(vec3d(k,k,4),"Obstacle");
-		k += 10;
-	}
-		
-	arenaEnemy1 = newEnemy(vec3d(d,c,2.5),"Enemy1", 30, 1, enemy1);
-	d += 5;
-	c -= 5;
-	arenaEnemy2 = newEnemy(vec3d(d,c,2.5),"Enemy2", 60, 1, enemy2);
-	d += 5;
-	c -= 5;
-	arenaEnemy3 = newEnemy(vec3d(d,c,2.5),"Enemy3", 90, 1, enemy3);
-
 	space = space_new();
     space_set_steps(space,100);
     
@@ -162,8 +153,6 @@ int main(int argc, char *argv[])
 		SDL_WarpMouseInWindow(NULL, 1024/2,768/2);
 
         graphics3d_frame_begin();
-		
-		//TODO: Insert flag check to call playerRotate and playerMove for after frame begin
 
 		if (Arrow != NULL)
 		{
@@ -177,7 +166,9 @@ int main(int argc, char *argv[])
 					Mix_PlayChannel(-1,explosionEffect, 0);
 			}
 		}
-
+		//===============================
+		// PLAYER VELOCITY BOUNDING
+		//===============================
 		if(player->body.velocity.x > 0)										// slow down on x, y, and z
 			player->body.velocity.x -= .008;
 		else if(player->body.velocity.x < 0)								// slow down on x, y, and z
@@ -199,26 +190,54 @@ int main(int argc, char *argv[])
 
 		if(player->body.position.z <= 2)									//Prevent floor clipping
 				player->body.position.z = 2;
-		
-		
+		//===============================
+		// END PLAYER VELOCITY BOUND
+		//===============================
+
+
+		//===============================
+		// ENEMY MOVEMENT UPDATING
+		//===============================
+		if(arenaEnemy1 != NULL)
+		{
+			enemy1Direction.x = player->position.x - arenaEnemy1->position.x;
+			enemy1Direction.y = player->position.y - arenaEnemy1->position.y;
+			vec3d_cpy(arenaEnemy1->position, arenaEnemy1->body.position);
+			arenaEnemy1->body.velocity.x = enemy1Direction.x * .01;
+			arenaEnemy1->body.velocity.y = enemy1Direction.y * .01;
+		}
+		if(arenaEnemy2 != NULL)
+		{
+			enemy2Direction.x = player->position.x - arenaEnemy2->position.x;
+			enemy2Direction.y = player->position.y - arenaEnemy2->position.y;
+			vec3d_cpy(arenaEnemy2->position, arenaEnemy2->body.position);
+			arenaEnemy2->body.velocity.x = enemy2Direction.x * .018;
+			arenaEnemy2->body.velocity.y = enemy2Direction.y * .018;
+		}
+		if(arenaEnemy3 != NULL)
+		{
+			enemy3Direction.x = player->position.x - arenaEnemy3->position.x;
+			enemy3Direction.y = player->position.y - arenaEnemy3->position.y;
+			vec3d_cpy(arenaEnemy3->position, arenaEnemy3->body.position);
+			arenaEnemy3->body.velocity.x = enemy3Direction.x * .015;
+			arenaEnemy3->body.velocity.y = enemy3Direction.y * .015;
+		}
+		//===============================
+		// END ENEMY MOVEMENT UPDATING
+		//===============================
 
 
         glPushMatrix();
 		if(playerRotating > 0)
 		{
-			//glPushMatrix();
-			//glRotatef(xAxis, 0.0f,1.0f,0.0f);
 			if(player->rotation.y + xAxis >= xhigh)
 				player->rotation.y = xhigh;
 			else if(player->rotation.y + xAxis <= xlow)
 				player->rotation.y = xlow;
 			else
 				player->rotation.y += xAxis;
-
-			//entity_draw(player);
-			//glPopMatrix();
 			playerRotating = 0;
-			slog("the value is %f", xAxis);
+			//slog("the value is %f", xAxis);
 		}
 		glPopMatrix();
 		glPushMatrix();
@@ -249,6 +268,30 @@ void touch_callback(void *data, void *context)
         //slog("other is: %s",other->name);
 		//slog("me is: %s",me->name);
 		//slog("name: %s",Arrow->name);
+		if(strcmp(me->name, "Enemy1")==0 && strcmp(other->name, "Player1")==0)
+		{
+			other->health -= me->attack;
+			slog("me is: %s",me->name);
+			slog("other is: %s",other->name);
+			slog("Player health is: %i", other->health);
+		}
+
+		if(strcmp(me->name, "Enemy2")==0 && strcmp(other->name, "Player1")==0)
+		{
+			other->health -= me->attack;
+			slog("me is: %s",me->name);
+			slog("other is: %s",other->name);
+			slog("Player health is: %i", other->health);
+		}
+
+		if(strcmp(me->name, "Enemy3")==0 && strcmp(other->name, "Player1")==0)
+		{
+			other->health -= me->attack;
+			slog("me is: %s",me->name);
+			slog("other is: %s",other->name);
+			slog("Player health is: %i", other->health);
+		}
+		
 		if(strcmp(me->name, "Arrow")==0)
 		{
 			if(strcmp(other->name,"Obstacle")==0)
@@ -262,7 +305,7 @@ void touch_callback(void *data, void *context)
 				
 			}
 
-			if(strcmp(other->name,"Enemy1")==0)
+			if(strcmp(other->name,"Enemy1")==0 && arenaEnemy1 != NULL)
 			{
 				
 				if(Arrow->usesOMana == 1)
@@ -281,8 +324,8 @@ void touch_callback(void *data, void *context)
 				{
 					space_remove_body(space, &arenaEnemy1->body);
 					entity_free(arenaEnemy1);
+					arenaEnemy1 = NULL;
 					Mix_PlayChannel(-1,deathEffect, 0);
-					//memset(&arenaEnemy1,0,sizeof(Entity));
 				}
 				
 			}
@@ -306,8 +349,8 @@ void touch_callback(void *data, void *context)
 				{
 					space_remove_body(space, &arenaEnemy2->body);
 					entity_free(arenaEnemy2);
+					arenaEnemy2 = NULL;
 					Mix_PlayChannel(-1,deathEffect, 0);
-					//memset(&arenaEnemy2,0,sizeof(Entity));
 				}
 				
 			}
@@ -331,8 +374,8 @@ void touch_callback(void *data, void *context)
 				{
 					space_remove_body(space, &arenaEnemy3->body);
 					entity_free(arenaEnemy3);
+					arenaEnemy3 = NULL;
 					Mix_PlayChannel(-1,deathEffect, 0);
-					//memset(&arenaEnemy3,0,sizeof(Entity));
 				}
 				
 			}
@@ -360,7 +403,7 @@ Entity *newArrow(Vec3D position, const char *name, int powerAttack)
     vec3d_cpy(ent->body.position,ent->position);
     cube_set(ent->body.bounds,0,0,0,.5,.5,.5);
     ent->rotation.x = 90;
-	ent->rotation.z = 360;
+	ent->rotation.z = 0;
     sprintf(ent->name,"%s",name);
     //ent->think = think;
     mgl_callback_set(&ent->body.touch,touch_callback,ent);
@@ -394,7 +437,7 @@ Entity *newPlayer(Vec3D position,const char *name)
     return ent;
 }
 
-Entity *newEnemy(Vec3D position,const char *name, int health, int attack, Sprite *texture)
+Entity *newEnemy(Vec3D position,const char *name, int health, int attack)
 {
 	Entity * ent;
     char buffer[255];
@@ -405,8 +448,14 @@ Entity *newEnemy(Vec3D position,const char *name, int health, int attack, Sprite
     {
         return NULL;
     }
+	if(strcmp(name, "Enemy1")==0)
+		ent->texture = LoadSprite("models/enemy1_text.png",1024,1024);
+	else if(strcmp(name, "Enemy2")==0)
+		ent->texture = LoadSprite("models/enemy2_text.png",1024,1024);
+	else
+		ent->texture = LoadSprite("models/enemy3_text.png",1024,1024);
+
     ent->objModel = obj_load("models/cube.obj");
-    ent->texture = texture;
 	ent->health = health;
 	ent->attack = attack;
 	strcpy(ent->name, name);
@@ -414,7 +463,7 @@ Entity *newEnemy(Vec3D position,const char *name, int health, int attack, Sprite
     vec3d_cpy(ent->body.position,ent->position);
     cube_set(ent->body.bounds,-1,-1,-1,2,2,2);
     ent->rotation.x = 90;
-	ent->rotation.z = 360;
+	ent->rotation.z = 0;
     sprintf(ent->name,"%s",name);
     //ent->think = think;
     mgl_callback_set(&ent->body.touch,touch_callback,ent);
@@ -505,8 +554,6 @@ void set_camera(Vec3D position, Vec3D rotation)
 
 void pollEvents()
 {
-	//playerRotating = 1;
-	//playerMoving = 0;
 	float xrad, yrad;
 	while ( SDL_PollEvent(&e) ) 
         {
@@ -546,7 +593,6 @@ void pollEvents()
 					player->rotation.x += yAxis;
 					*/
 			}
-			//vec3d(-sin(player->rotation.z * DEGTORAD),cos(player->rotation.z * DEGTORAD),0);
             else if (e.type == SDL_KEYDOWN)
             {
 				switch(e.key.keysym.sym)
@@ -641,23 +687,6 @@ void pollEvents()
 				}
 			}
 	}
-}
-
-void drawHealthBar()
-{
-
-}
-
-void playerRotate()
-{
-	// need the angle for rotation
-
-
-}
-
-void playerMove()
-{
-
 }
 
 /*eol@eof*/
