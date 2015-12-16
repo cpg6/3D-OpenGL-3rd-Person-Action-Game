@@ -42,6 +42,8 @@ void set_camera(Vec3D position, Vec3D rotation);
 void pollEvents();
 void updateBounds();
 void touch_callback(void *data, void *context);
+void drawHealth(Vec3D Offset);
+void drawMana(Vec3D Offset);
 Entity *newPlayer(Vec3D position,const char *name);
 Entity *newFloor(Vec3D position,const char *name);
 Entity *newWall(Vec3D position,const char *name);
@@ -60,7 +62,6 @@ Entity *player, *arenaWall, *arenaFloor, *arenaObstacle[10],
 Sprite *enemy1, *enemy2, *enemy3;
 Space *space;
 Mix_Chunk *explosionEffect, *bowEffect, *deathEffect;
-float red = 125, green = 250, blue = 150;
 GLfloat xAxis, yAxis;
 int xMouse, yMouse; 
 int xhigh = 720, xlow = 0;
@@ -69,8 +70,8 @@ int playerRotating = 0;
 int playerMoving = 0;
 float maxXVeloc = .5, maxYVeloc = .5, maxZVeloc = .5;
 float minXVeloc = -.5, minYVeloc = -.5, minZVeloc = -.5;
-float mag;
 Vec3D direction, enemy1Direction, enemy2Direction, enemy3Direction;
+Sprite *healthbar, *manabar;
 
 int main(int argc, char *argv[])
 {
@@ -115,7 +116,9 @@ int main(int argc, char *argv[])
 	d += 5;
 	c -= 5;
 	arenaEnemy3 = newEnemy(vec3d(d,c,2.5),"Enemy3", 90, 1);
-    
+    healthbar = LoadSprite("textures/health_bar.png",606,46);
+	manabar = LoadSprite("textures/mana_bar.png",259,26);
+
     glGenVertexArrays(1, &vao);
     glBindVertexArray(vao); //make our vertex array object, we need it to restore state we set after binding it. Re-binding reloads the state associated with it.
     
@@ -185,13 +188,13 @@ int main(int argc, char *argv[])
 
 		if(player->body.velocity.z > 0)
 			player->body.velocity.z -= .064;
-		else if(player->body.velocity.z >= 2)
-			player->body.velocity.z -= .064;
+		//if(player->body.velocity.z >= 2)
+			//player->body.velocity.z -= .064;
 
 		if(player->body.position.z <= 2)									//Prevent floor clipping
-				player->body.position.z = 2;
+			player->body.position.z = 2;
 		//===============================
-		// END PLAYER VELOCITY BOUND
+		// END PLAYER VELOCITY BOUNDING
 		//===============================
 
 
@@ -200,8 +203,8 @@ int main(int argc, char *argv[])
 		//===============================
 		if(arenaEnemy1 != NULL)
 		{
-			enemy1Direction.x = player->position.x - arenaEnemy1->position.x;
-			enemy1Direction.y = player->position.y - arenaEnemy1->position.y;
+			enemy1Direction.x = player->position.x - arenaEnemy1->position.x;	//This could be done as vector, just cleaner to read
+			enemy1Direction.y = player->position.y - arenaEnemy1->position.y;	//this way
 			vec3d_cpy(arenaEnemy1->position, arenaEnemy1->body.position);
 			arenaEnemy1->body.velocity.x = enemy1Direction.x * .01;
 			arenaEnemy1->body.velocity.y = enemy1Direction.y * .01;
@@ -245,11 +248,18 @@ int main(int argc, char *argv[])
 		vec3d_updateCam(newCamRotation, player->rotation);					//Fix messed up rotations between player/camera
 		set_camera(newCameraPosition,newCamRotation);						//Apply camera to new snap point
 		vec3d_cpy(player->position,player->body.position);					//update mesh position to body for player
+		
 		entity_draw_all();
         glPopMatrix();
-
+		drawHealth(vec3d(-.0001,0.07,0));
+		drawMana(vec3d(-.001,.15,0));
         /* drawing code above here! */
         graphics3d_next_frame();
+		if(player->health <= 0)
+		{
+			Mix_Quit();
+			return 0;
+		}
     } 
 	Mix_Quit();
     return 0;
@@ -424,7 +434,7 @@ Entity *newPlayer(Vec3D position,const char *name)
     ent->objModel = obj_load("models/cube.obj");
     ent->texture = LoadSprite("models/cube_text.png",1024,1024);
 	ent->health = 100;
-	ent->offensiveMana = 50;
+	ent->offensiveMana = 101;
 	strcpy(ent->name, name);
 	vec3d_cpy(ent->position,position);
     vec3d_cpy(ent->body.position,ent->position);
@@ -633,11 +643,11 @@ void pollEvents()
 							//player->body.velocity.x = maxXVeloc;
 						break;
 					}
-					case SDLK_SPACE:
-					{
-						player->body.velocity.z = maxZVeloc;
-						break;
-					}
+					//case SDLK_SPACE:
+					//{
+						//player->body.velocity.z += 1;
+						//break;
+					//}
 					case SDLK_ESCAPE:
 					{
 						bGameLoopRunning = 0;
@@ -673,13 +683,13 @@ void pollEvents()
 				}
 				else
 				{
-					if(player->offensiveMana >= 10)
+					if(player->offensiveMana >= 25)
 					{
 						vec3d_add(newArrowPos,player->body.position,arrowOffset);
 						Arrow = newArrow(newArrowPos,"Arrow", 1);
 						space_add_body(space,&Arrow->body);
 						Arrow->body.velocity = vec3d(-sin(player->rotation.y * DEGTORAD),cos(player->rotation.y * DEGTORAD),0);
-						player->offensiveMana -= 10;
+						player->offensiveMana -= 25;
 						if(player->offensiveMana < 0)
 							player->offensiveMana = 0;
 						Mix_PlayChannel(-1,bowEffect, 0);
@@ -687,6 +697,178 @@ void pollEvents()
 				}
 			}
 	}
+}
+
+void drawHealth(Vec3D offset)
+{
+	Vec3D hpverts[4];
+	Vec2D hpuVs[4];
+	int h = player->health;
+	float hscale;
+
+	hscale = (h / 100.0) - 1.0;
+
+	//bottom left vert
+	hpverts[0].x=-1;
+	hpverts[0].y=.9f;
+	hpverts[0].z=1;
+	//top left vert
+	hpverts[1].x=-1;
+	hpverts[1].y=1;
+	hpverts[1].z=1;
+	//top right vert
+	hpverts[2].x=-.01f + hscale;
+	hpverts[2].y=1;
+	hpverts[2].z=1;
+	//bottom right vert
+	hpverts[3].x=-.01f + hscale;
+	hpverts[3].y=0.9f;
+	hpverts[3].z=1;
+
+	//bottom left UV
+	hpuVs[0].x= offset.x;
+	hpuVs[0].y= offset.y;
+	//top left UV
+	hpuVs[1].x= offset.x;
+	hpuVs[1].y= 1 - offset.y;
+	//bottom right UV
+	hpuVs[2].x=.5;
+	hpuVs[2].y= offset.y;
+	//top right UV
+	hpuVs[3].x=.5;
+	hpuVs[3].y=1;
+	
+	glMatrixMode(GL_PROJECTION);
+	glPushMatrix();
+	glLoadIdentity();
+	gluOrtho2D(-1.0f,1,-1,1);
+    glEnable(GL_BLEND);
+    glColorMaterial(GL_FRONT,GL_DIFFUSE);
+    glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+
+	glEnable(GL_TEXTURE_2D);
+	glEnable(GL_COLOR_MATERIAL);
+	glDisable(GL_DEPTH_TEST);
+	glMatrixMode(GL_MODELVIEW);
+	glTranslatef(-offset.x,-offset.y,-offset.z);
+	glPushMatrix();
+	glBindTexture(GL_TEXTURE_2D,healthbar->texture);
+	
+	glBegin(GL_TRIANGLES);
+
+	glTexCoord2f(hpuVs[0].x,hpuVs[0].y);
+	glVertex3f(hpverts[0].x,hpverts[0].y,hpverts[0].z);
+	
+	glTexCoord2f(hpuVs[2].x,hpuVs[2].y);
+	glVertex3f(hpverts[2].x,hpverts[2].y,hpverts[2].z);
+
+	glTexCoord2f(hpuVs[1].x,hpuVs[1].y);
+	glVertex3f(hpverts[1].x,hpverts[1].y,hpverts[1].z);
+
+	glTexCoord2f(hpuVs[0].x,hpuVs[0].y);
+	glVertex3f(hpverts[0].x,hpverts[0].y,hpverts[0].z);
+
+	glTexCoord2f(hpuVs[3].x,hpuVs[3].y);
+	glVertex3f(hpverts[3].x,hpverts[3].y,hpverts[3].z);
+
+	glTexCoord2f(hpuVs[2].x,hpuVs[2].y);
+	glVertex3f(hpverts[2].x,hpverts[2].y,hpverts[2].z);
+	
+	glEnd();
+    glDisable(GL_BLEND);
+	glDisable(GL_TEXTURE_2D);
+    glPopMatrix();
+	
+	glMatrixMode(GL_PROJECTION);
+	glPopMatrix();
+	glEnable(GL_DEPTH_TEST);
+	glMatrixMode(GL_MODELVIEW);
+	
+}
+
+void drawMana(Vec3D offset)
+{
+	Vec3D manaverts[4];
+	Vec2D manauVs[4];
+	int m = player->offensiveMana;
+	float mscale;
+
+	mscale = (m / 100.0) - 1.0;
+	//bottom left vert
+	manaverts[0].x=-1;
+	manaverts[0].y=.95f;
+	manaverts[0].z=1;
+	//top left vert
+	manaverts[1].x=-1;
+	manaverts[1].y=1;
+	manaverts[1].z=1;
+	//top right vert
+	manaverts[2].x=-.1f + mscale;
+	manaverts[2].y=1;
+	manaverts[2].z=1;
+	//bottom right vert
+	manaverts[3].x=-.1f + mscale;
+	manaverts[3].y=0.95f;
+	manaverts[3].z=1;
+
+	//bottom left UV
+	manauVs[0].x= offset.x;
+	manauVs[0].y= offset.y;
+	//top left UV
+	manauVs[1].x= offset.x;
+	manauVs[1].y= 1 - offset.y;
+	//bottom right UV
+	manauVs[2].x=.5;
+	manauVs[2].y= offset.y;
+	//top right UV
+	manauVs[3].x=.5;
+	manauVs[3].y=1;
+	
+	glMatrixMode(GL_PROJECTION);
+	glPushMatrix();
+	glLoadIdentity();
+	gluOrtho2D(-1.0f,1,-1,1);
+    glEnable(GL_BLEND);
+    glColorMaterial(GL_FRONT,GL_DIFFUSE);
+    glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+
+	glEnable(GL_TEXTURE_2D);
+	glEnable(GL_COLOR_MATERIAL);
+	glDisable(GL_DEPTH_TEST);
+	glMatrixMode(GL_MODELVIEW);
+	glTranslatef(-offset.x,-offset.y,-offset.z);
+	glPushMatrix();
+	glBindTexture(GL_TEXTURE_2D,manabar->texture);
+	
+	glBegin(GL_TRIANGLES);
+
+	glTexCoord2f(manauVs[0].x,manauVs[0].y);
+	glVertex3f(manaverts[0].x,manaverts[0].y,manaverts[0].z);
+	
+	glTexCoord2f(manauVs[2].x,manauVs[2].y);
+	glVertex3f(manaverts[2].x,manaverts[2].y,manaverts[2].z);
+
+	glTexCoord2f(manauVs[1].x,manauVs[1].y);
+	glVertex3f(manaverts[1].x,manaverts[1].y,manaverts[1].z);
+
+	glTexCoord2f(manauVs[0].x,manauVs[0].y);
+	glVertex3f(manaverts[0].x,manaverts[0].y,manaverts[0].z);
+
+	glTexCoord2f(manauVs[3].x,manauVs[3].y);
+	glVertex3f(manaverts[3].x,manaverts[3].y,manaverts[3].z);
+
+	glTexCoord2f(manauVs[2].x,manauVs[2].y);
+	glVertex3f(manaverts[2].x,manaverts[2].y,manaverts[2].z);
+	
+	glEnd();
+    glDisable(GL_BLEND);
+	glDisable(GL_TEXTURE_2D);
+    glPopMatrix();
+	
+	glMatrixMode(GL_PROJECTION);
+	glPopMatrix();
+	glEnable(GL_DEPTH_TEST);
+	glMatrixMode(GL_MODELVIEW);
 }
 
 /*eol@eof*/
